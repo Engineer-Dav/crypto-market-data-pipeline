@@ -1,0 +1,28 @@
+# Python
+
+**pycache**/
+*.py[cod]
+
+# Virtual Environments
+
+venv/
+.venv/
+env/
+
+# Environment Variables
+
+.env
+
+# Logs
+
+logs/
+*.log
+
+# VS Code
+
+.vscode/
+
+# Windows
+
+Thumbs.db
+desktop.ini
