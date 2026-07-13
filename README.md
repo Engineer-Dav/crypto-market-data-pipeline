@@ -338,6 +338,7 @@ Each execution will:
 # 👨‍💻 Author
 
 **David Mike**
+
 **Engineer-Dav**
 
 This project demonstrates the design and implementation of an end-to-end data pipeline using Python and PostgreSQL. It showcases data ingestion from a live API, ETL processing, dimensional data modeling with a star schema, Medallion Architecture, and the creation of analytics-ready datasets for business intelligence applications such as Microsoft Power BI.
