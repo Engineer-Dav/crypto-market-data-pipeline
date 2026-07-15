@@ -84,6 +84,9 @@ def extract_bronze_data():
             connection.close()
 
 def insert_silver_data(data):
+    if data.empty:
+        logger.warning("No data to insert into silver, skipping")
+        return
     connection, cursor = None, None
     try:
         connection,cursor = get_connection()
