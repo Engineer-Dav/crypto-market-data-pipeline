@@ -5,6 +5,9 @@ from logger import logger
 def read_bronze_data():
     data = extract_bronze_data()
     df = pd.DataFrame(data)
+    if df.empty:
+        logger.warning("No bronze data found, returning empty DataFrame")
+        return df
     logger.info("Bronze data loaded into DataFrame")
     return df
 
@@ -33,6 +36,8 @@ def validate_ranges(df):
 
 def transform_silver():
     df = read_bronze_data()
+    if df.empty:
+        return df
     df = fix_types(df)
     df = fix_duplicates(df)
     data = validate_ranges(df)
