@@ -1,343 +1,225 @@
-# 🚀 Crypto Market Data Pipeline
+# Crypto Market Data Pipeline
 
-An end-to-end Data Engineering project that extracts live cryptocurrency market data from the CoinGecko API, stores historical records in PostgreSQL using the Medallion Architecture, transforms the data into analytics-ready datasets, and prepares them for visualization in Microsoft Power BI.
+A batch ETL pipeline that ingests cryptocurrency market data from the CoinGecko API, processes it through a Bronze → Silver → Gold medallion architecture, and lands it in PostgreSQL as a queryable star schema. Orchestrated with Apache Airflow, containerized end-to-end with Docker.
 
----
+The design goal was reproducibility: every table downstream of the API call can be rebuilt from stored raw data, without hitting CoinGecko again.
 
-# 📌 Project Overview
-
-This project demonstrates the complete lifecycle of a modern data engineering pipeline.
-
-The pipeline automatically extracts live cryptocurrency market data, validates and transforms it, stores historical records in PostgreSQL, and organizes the data into Bronze, Silver, and Gold layers following the Medallion Architecture.
-
-The final Gold layer contains business-ready datasets optimized for reporting and dashboard development.
+**Stack:** Python · Apache Airflow · PostgreSQL · Docker · pandas · psycopg2
 
 ---
 
-# 🎯 Objectives
+## Table of Contents
 
-* Extract live cryptocurrency market data automatically.
-* Preserve raw historical data.
-* Build a dimensional model using Fact and Dimension tables.
-* Produce analytics-ready Gold tables.
-* Demonstrate an end-to-end ETL workflow.
-* Implement logging for monitoring and debugging.
-* Prepare the data warehouse for Microsoft Power BI.
+- [Architecture](#architecture)
+- [Database Schema](#database-schema)
+- [Project Structure](#project-structure)
+- [Pipeline Workflow](#pipeline-workflow)
+- [Medallion Architecture](#medallion-architecture)
+- [Data Quality Checks](#data-quality-checks)
+- [Engineering Decisions](#engineering-decisions)
+- [Apache Airflow](#apache-airflow)
+- [Pipeline Execution](#pipeline-execution)
+- [Getting Started](#getting-started)
+- [Future Improvements](#future-improvements)
+- [Author](#author)
 
 ---
 
-# 🏗 Architecture
+## Architecture
 
 ```text
-                         CoinGecko API
-                               │
-                               ▼
-                    ┌─────────────────────┐
-                    │   Bronze Layer      │
-                    │ crypto_market_raw   │
-                    └─────────────────────┘
-                               │
-                               ▼
-                    ┌─────────────────────┐
-                    │    Silver Layer     │
-                    ├─────────────────────┤
-                    │ dim_crypto_asset    │
-                    │ fact_crypto_market  │
-                    └─────────────────────┘
-                               │
-              ┌────────────────┴────────────────┐
-              │                                 │
-              ▼                                 ▼
- ┌─────────────────────────┐       ┌─────────────────────────┐
- │ gold_market_overview    │       │ gold_market_statistics  │
- └─────────────────────────┘       └─────────────────────────┘
-              │                                 │
-              └────────────────┬────────────────┘
-                               ▼
-                    Microsoft Power BI
+                    Apache Airflow
+                          │
+                          ▼
+                    python main.py
+                          │
+                          ▼
+                  CoinGecko API
+                          │
+                          ▼
+        ┌─────────────────────────────────┐
+        │ Bronze Layer                    │
+        │ crypto_market_raw               │
+        └─────────────────────────────────┘
+                          │
+                extract_bronze_data()
+                          │
+                          ▼
+               Data Transformation
+      (type fixing, duplicate removal,
+           range validation)
+                          │
+          ┌───────────────┴───────────────┐
+          ▼                               ▼
+┌──────────────────────┐      ┌──────────────────────┐
+│ dim_crypto_asset     │◄────►│ fact_crypto_market   │
+│ (Dimension Table)    │      │ (Fact Table)         │
+└──────────────────────┘      └──────────────────────┘
+          │                               │
+          └───────────────┬───────────────┘
+                          ▼
+          ┌───────────────┴───────────────┐
+          ▼                               ▼
+┌────────────────────────┐     ┌────────────────────────┐
+│ gold_market_overview   │     │ gold_market_statistics │
+│ Dashboard-ready data   │     │ Aggregated metrics     │
+└────────────────────────┘     └────────────────────────┘
 ```
 
 ---
 
-# 🥉 Bronze Layer
+## Database Schema
 
-## Table
-
-`crypto_market_raw`
-
-### Purpose
-
-Stores raw cryptocurrency market data exactly as received from the CoinGecko API.
-
-### Characteristics
-
-* Historical data is preserved.
-* No transformations are applied.
-* Acts as the source of truth.
-* Supports auditing and historical replay.
+![Database Schema](images/crypto_market_data_schema.png)
 
 ---
 
-# 🥈 Silver Layer
-
-The Silver layer cleans, validates, and structures the Bronze data.
-
-## Dimension Table
-
-`dim_crypto_asset`
-
-Contains one unique record for every cryptocurrency.
-
-Columns include:
-
-* coin_id
-* symbol
-* name
-
----
-
-## Fact Table
-
-`fact_crypto_market`
-
-Stores historical market observations.
-
-Columns include:
-
-* prices
-* market_cap
-* market_cap_rank
-* total_volume
-* price_change_percentage_24h
-* last_updated
-* ingestion_time
-* dim_id
-
-The Fact table continuously grows as new market snapshots are collected.
-
----
-
-# 🥇 Gold Layer
-
-The Gold layer contains analytics-ready datasets designed for reporting.
-
-## gold_market_overview
-
-Provides the most recent market snapshot for every cryptocurrency.
-
-Contains:
-
-* Coin ID
-* Symbol
-* Name
-* Current Price
-* Market Capitalization
-* Market Rank
-* Trading Volume
-* Price Change (24 Hours)
-* Last Updated
-* Refresh Time
-
-One row is maintained for each cryptocurrency through PostgreSQL UPSERT operations.
-
----
-
-## gold_market_statistics
-
-Provides historical analytical metrics.
-
-Contains:
-
-* Average Price
-* Average Volume
-* Highest Price
-* Lowest Price
-* Average Market Capitalization
-* Price Volatility
-* Refresh Time
-
-These statistics are recalculated every pipeline execution.
-
----
-
-# ⚙ ETL Workflow
-
-## Extract
-
-* Retrieve live cryptocurrency market data from the CoinGecko API.
-
-## Transform
-
-* Read Bronze data.
-* Convert data types.
-* Remove duplicate records.
-* Validate numeric ranges.
-* Prepare clean datasets.
-
-## Load
-
-* Load transformed data into the Silver layer.
-* Populate the Fact and Dimension tables.
-* Refresh the Gold reporting tables.
-* Update existing records using PostgreSQL UPSERT (`ON CONFLICT`).
-
----
-
-# 📂 Project Structure
+## Project Structure
 
 ```text
-market-data-pipeline/
-
+crypto_market-data-pipeline/
+│
+├── dags/
+├── images/
+├── logs/
+├── sql/
 ├── api.py
 ├── database.py
 ├── transform.py
 ├── logger.py
 ├── main.py
-├── database.sql
+├── Dockerfile
+├── docker-compose.yml
+├── docker-compose-airflow.yaml
 ├── requirements.txt
-├── README.md
+├── .env.example
 ├── .gitignore
-├── logs/
-└── .env
+└── README.md
 ```
 
 ---
 
-# 🛠 Technologies Used
+## Pipeline Workflow
 
-## Programming
-
-* Python
-
-## Database
-
-* PostgreSQL
-
-## Python Libraries
-
-* pandas
-* requests
-* psycopg2-binary
-* python-dotenv
-
-## Data Engineering Concepts
-
-* ETL Pipeline
-* Medallion Architecture
-* Star Schema
-* Fact & Dimension Modeling
-* Incremental Loading
-* Logging
-
-## Visualization
-
-* Microsoft Power BI
+1. Extract live market data from the CoinGecko API.
+2. Persist the raw response to the **Bronze** layer, unmodified.
+3. Read from Bronze — never from the API — as the source for transformation.
+4. Cast fields to their correct types.
+5. Drop duplicate records.
+6. Validate numeric ranges (price, market cap, volume).
+7. Load conformed records into the Silver star schema.
+8. Aggregate into Gold-layer reporting tables.
+9. Commit the transaction.
 
 ---
 
-# 📋 Requirements
+## Medallion Architecture
 
-## Software Requirements
+### Bronze — raw, immutable
 
-Before running this project, ensure the following software is installed:
+`crypto_market_raw` stores the CoinGecko API response as-is. No parsing, no casting, no filtering. This is the pipeline's replay source — if a downstream step fails or a business rule changes, Bronze can be reprocessed without re-calling the API.
 
-* Python 3.10 or later
-* PostgreSQL 14 or later
-* Git
+### Silver — conformed, modeled
+
+Bronze records are cleaned and shaped into a star schema:
+
+- `dim_crypto_asset` — asset-level attributes
+- `fact_crypto_market` — market metrics at time of extraction
+
+Transformations are type casting, deduplication, and range validation — implemented as separate, composable functions rather than one monolithic step.
+
+### Gold — aggregated, consumption-ready
+
+- `gold_market_overview`
+- `gold_market_statistics`
+
+Pre-aggregated for downstream reporting/dashboarding, so consumers aren't re-deriving the same rollups from the fact table on every query.
 
 ---
 
-## Python Dependencies
+## Data Quality Checks
 
-Install the required Python packages:
+Validation happens at the Bronze → Silver boundary, not after the fact:
+
+- **Type enforcement** — numeric fields (price, market cap, volume) are cast explicitly; anything that fails to cast is treated as bad data, not coerced.
+- **Deduplication** — duplicate records from the API response are dropped before they reach the fact table.
+- **Range validation** — records with invalid values (e.g. negative price) are **dropped, not imputed**. A missing row is easier to reason about downstream than a silently fabricated one.
+
+This is enforced in code (`transform.py`), not just assumed at query time.
+
+---
+
+## Engineering Decisions
+
+**Bronze gets its own transaction**
+Bronze writes commit independently of Silver/Gold. If the transform stage throws, the raw extract is already durable — reprocessing means re-reading Bronze, not re-hitting a rate-limited third-party API.
+
+**Silver and Gold share a transaction**
+These stages are tightly coupled: a fact row and its aggregates should never be half-committed. If either fails, both roll back, so Gold tables never reflect a Silver state that doesn't actually exist.
+
+**No direct API reads past Bronze**
+Every transformation downstream of ingestion reads from the Bronze table. This makes the pipeline replayable and keeps the CoinGecko API as a boundary, not a dependency scattered across the codebase.
+
+---
+
+## Apache Airflow
+
+The DAG orchestrates `main.py` end-to-end, enabling scheduled or manually triggered runs through the Airflow UI rather than a cron job with no observability.
+
+![Apache Airflow DAG](images/airflow_dag.png)
+
+---
+
+## Pipeline Execution
+
+A completed run — API extraction, Bronze load, Silver transformation, Gold aggregation, commit.
+
+![Pipeline Execution](images/pipeline_execution.png)
+
+---
+
+## Getting Started
+
+### Clone the Repository
 
 ```bash
-pip install -r requirements.txt
+git clone https://github.com/David-Ose-Mike/crypto_market-data-pipeline.git
+cd crypto_market-data-pipeline
 ```
 
----
+### Configure Environment Variables
 
-# ⚙ Configuration
+Copy `.env.example` to `.env` and fill in your own values. `.env` is gitignored — it should never be committed.
 
-Create a `.env` file in the project root.
-
-```env
-DB_NAME=market_data_db
-DB_USER=postgres
-DB_PASSWORD=your_password
-DB_HOST=localhost
-DB_PORT=5432
-```
-
----
-
-# 🚀 Running the Pipeline
-
-Run the project with:
+### Build and Run
 
 ```bash
-python main.py
+docker compose up --build
 ```
 
-Each execution will:
+### Run with Airflow
 
-* Extract live cryptocurrency data
-* Store raw data in Bronze
-* Transform and load data into Silver
-* Refresh the Gold reporting tables
-* Record execution logs
+```bash
+docker compose -p airflow -f docker-compose-airflow.yaml up airflow-init
 
----
+docker compose -p airflow -f docker-compose-airflow.yaml up -d
+```
 
-# 📊 Features
-
-* Live API ingestion
-* Historical data storage
-* Data validation
-* Duplicate handling
-* PostgreSQL UPSERT operations
-* Star Schema implementation
-* Gold reporting layer
-* Modular Python architecture
-* Logging and monitoring
-* Power BI ready
+Open `http://localhost:8080` and trigger the **crypto_market_data_pipeline** DAG.
 
 ---
 
-# 📈 Future Improvements
+## Future Improvements
 
-* Apache Airflow orchestration
-* Docker containerization
-* Microsoft Fabric integration
-* Azure deployment
-* Automated scheduling
-* Power BI dashboard
-* CI/CD pipeline
-* Unit testing
+- Break Bronze, Silver, and Gold into separate Airflow tasks instead of one monolithic run, for better failure isolation and partial reprocessing.
+- Add pytest coverage for the transform functions (`fix_types`, `fix_duplicates`, `validate_ranges`).
+- Add data quality monitoring/alerting beyond drop-on-failure (e.g. row-count anomaly checks between runs).
+- Move from manual trigger to a scheduled DAG interval.
+- Extend ingestion to additional market data sources.
 
 ---
 
-# 📚 Concepts Demonstrated
-
-* ETL
-* PostgreSQL
-* SQL
-* Python
-* Data Warehousing
-* Medallion Architecture
-* Star Schema
-* Fact Tables
-* Dimension Tables
-* Incremental Loading
-* Data Validation
-* Logging
-* Analytics Engineering
-
----
-
-# 👨‍💻 Author
+## Author
 
 **David Mike**
-**Engineer-Dav**
-
-This project demonstrates the design and implementation of an end-to-end data pipeline using Python and PostgreSQL. It showcases data ingestion from a live API, ETL processing, dimensional data modeling with a star schema, Medallion Architecture, and the creation of analytics-ready datasets for business intelligence applications such as Microsoft Power BI.
+GitHub: [David-Ose-Mike](https://github.com/David-Ose-Mike)

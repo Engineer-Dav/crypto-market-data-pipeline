@@ -7,10 +7,11 @@ def get_crypto_data():
         url = BASE_URL + ENDPOINT
         params = {
             "vs_currency": "usd",
-            "per_page": 10,
+            "per_page": 20,
             "page": 1
             }
-        response = requests.get(url,params=params)
+        response = requests.get(url,params=params,timeout=10)
+        response.raise_for_status()
         data = response.json()
         return data
     

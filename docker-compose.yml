@@ -1,0 +1,23 @@
+services:
+  postgres:
+    container_name: crypto_postgres
+    image: postgres:18
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+      - ./sql/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+  crypto_market_data_pipeline:
+    container_name: crypto_market_data_pipeline
+    build: .
+    depends_on:
+      - postgres
+    env_file:
+      - .env
+    command: tail -f /dev/null
+volumes:
+  postgres_data:

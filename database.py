@@ -3,29 +3,42 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from dotenv import load_dotenv
 from logger import logger
+import time
 load_dotenv()
+import sys
 
 def get_connection():
-    try:
-        connection = psycopg2.connect(
-            dbname = os.getenv("DB_NAME"),
-            user = os.getenv("DB_USER"),
-            password = os.getenv("DB_PASSWORD"),
-            host = os.getenv("DB_HOST"),
-            port = os.getenv("DB_PORT")
-        )
-        cursor = connection.cursor(cursor_factory=RealDictCursor)
-        logger.info("Connected to database successfully")
-        return connection,cursor
-    except psycopg2.Error as e:
-        logger.error(f"Database connection error: {e}")
+    for attempt in range(10):
+        try:
+            connection = psycopg2.connect(
+                dbname = os.getenv("DB_NAME"),
+                user = os.getenv("DB_USER"),
+                password = os.getenv("DB_PASSWORD"),
+                host = os.getenv("DB_HOST"),
+                port = os.getenv("DB_PORT")
+            )
+            cursor = connection.cursor(cursor_factory=RealDictCursor)
+            logger.info("Connected to database successfully")
+            return connection,cursor
+        except psycopg2.OperationalError:
+            logger.warning(f"Waiting for PostgreSQL...Attempt {attempt + 1}/10")
+            time.sleep(3)
+        except psycopg2.Error as e:
+            logger.error(f"Database connection error: {e}")
+            return None, None
+    logger.error("Failed to connect to PostgreSQL after 10 attempts.")
+    return None, None
+
 def insert_bronze_data(data):
+    if not data:
+        logger.warning("No data to insert into bronze, skipping")
+        return
     connection, cursor = None, None
     try:
         connection, cursor = get_connection()
         if connection is None or cursor is None:
-            logger.warning("Could not connect to database, aborting insert")
-            return
+            logger.warning("Could not connect to database, aborted insert to Bronze")
+            sys.exit(1)
         else:
             for coin in data:
                 cursor.execute("""INSERT INTO crypto_market_raw(
@@ -64,7 +77,7 @@ def extract_bronze_data():
     try:
         connection,cursor = get_connection()
         if connection is None or cursor is None:
-            logger.warning("Could not connect to database, aborting extract from Bronze")
+            logger.error("Could not connect to database, aborted extract from Bronze")
             return
         cursor.execute("SELECT * FROM crypto_market_raw")
         data = cursor.fetchall()
@@ -78,12 +91,13 @@ def extract_bronze_data():
         if connection:
             connection.close()
 
-def insert_silver_data(data):
-    connection, cursor = None, None
+def insert_silver_data(data,cursor):
+    if data.empty:
+        logger.warning("No data to insert into silver, skipping")
+        return
     try:
-        connection,cursor = get_connection()
-        if connection is None or cursor is None:
-            logger.warning("Could not connect to database, aborting insert to Silver")
+        if cursor is None:
+            logger.warning("Could not execute insert to Silver")
             return
         for coins in data.to_dict("records"):
             cursor.execute("""INSERT INTO dim_crypto_asset (coin_id, symbol, name_)
@@ -118,21 +132,14 @@ def insert_silver_data(data):
                             coins["high_24h"],coins["low_24h"],coins["price_change_24h"],
                             coins["price_change_percentage_24h"],coins["ath"],coins["ath_date"],
                             coins["last_updated"]))
-        connection.commit()
         logger.info("Data loaded to silver successfully")    
     except psycopg2.Error as e:
         logger.error(f"Database Error: {e}")
-    finally:
-        if cursor:
-            cursor.close()
-        if connection:
-            connection.close()
-        
-def insert_gold_market_overview():
-    connection, cursor = None, None
+
+
+def insert_gold_market_overview(cursor):
     try:
-        connection, cursor = get_connection()
-        if connection is None or cursor is None:
+        if cursor is None:
             logger.warning("Could not connect to database, aborting insert to Gold overview")
             return
         cursor.execute("""INSERT INTO gold_market_overview(
@@ -172,21 +179,13 @@ def insert_gold_market_overview():
                        last_updated = EXCLUDED.last_updated,
                        refresh_time = CURRENT_TIMESTAMP;
                        """)
-        connection.commit()
         logger.info("Data loaded to Gold overview successfully")
     except psycopg2.Error as e:
         logger.error(f"Database Error: {e}")
-    finally:
-        if cursor:
-            cursor.close()
-        if connection:
-            connection.close()
 
-def insert_gold_market_statistics():
-    connection, cursor = None,None
+def insert_gold_market_statistics(cursor):
     try:
-        connection,cursor = get_connection()
-        if connection is None or cursor is None:
+        if cursor is None:
             logger.warning("Could not connect to database, aborting insert to Gold statistics")
             return
         cursor.execute("""INSERT INTO gold_market_statistics(
@@ -229,12 +228,6 @@ def insert_gold_market_statistics():
                        price_volatility = EXCLUDED.price_volatility,
                        refresh_time = CURRENT_TIMESTAMP;
                        """)
-        connection.commit()
         logger.info("Data loaded to gold statistics successfully")
     except psycopg2.Error as e:
         logger.error(f"Database Error: {e}")
-    finally:
-        if cursor:
-            cursor.close()
-        if connection:
-            connection.close()
